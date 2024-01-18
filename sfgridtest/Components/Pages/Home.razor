@@ -60,28 +60,10 @@
     }
     private TestInstrument? _SelectedInstrument { get; set; }
 
-    private ObservableCollection<TestInstrument> defaultInstruments = new ObservableCollection<TestInstrument>()
-    {
-        new TestInstrument("MSFT",390),
-        new TestInstrument("APPL", 180),
-        new TestInstrument("NVDA", 450),
-        new TestInstrument("QQQ", 400),
-        new TestInstrument("OTP", 15000),
-            new TestInstrument("Test1", 1000),
-            new TestInstrument("Test2", 2000),
-            new TestInstrument("Test3", 3000),
-            new TestInstrument("Test4", 4000),
-            new TestInstrument("Test5", 5000),
-            new TestInstrument("Test6", 6000),
-            new TestInstrument("Test7", 7000),
-            new TestInstrument("Test8", 8000),
-            new TestInstrument("Test9", 9000),
-            new TestInstrument("Test10", 10000)
-    };
+    private ObservableCollection<TestInstrument> defaultInstruments { get; set; } = new();
 
     protected override async Task OnInitializedAsync()
     {
-        SelectedInstrument = defaultInstruments.FirstOrDefault();
         _hubConnection = new HubConnectionBuilder()
             .WithUrl(Navigation.ToAbsoluteUri("/TestHub"), options =>
             {
@@ -90,6 +72,7 @@
             .WithAutomaticReconnect()
             .Build();
         _disposables.Add(_hubConnection.On<string, PriceType, decimal?>("PriceChange",OnPriceChange));
+        _disposables.Add(_hubConnection.On<TestInstrument>("Instrument", OnInstrument));
 
         await _hubConnection.StartAsync();
 
@@ -106,6 +89,19 @@
     public void InstrumentPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
         InvokeAsync(StateHasChanged);
+    }
+
+    public void OnInstrument(TestInstrument instr)
+    {
+        lock (defaultInstruments)
+        {
+            if (!defaultInstruments.Any(x => x.Ticker == instr.Ticker))
+            {
+                defaultInstruments.Add(instr);
+            }
+        }
+        if (SelectedInstrument == null)
+            SelectedInstrument = instr;
     }
 
     public void OnPriceChange(string Ticker, PriceType type, decimal? price)

@@ -89,24 +89,7 @@ namespace sfgridtest
     public class PriceDistributor
     {
         private readonly IHubContext<TestHub> _context;
-
-        public PriceDistributor(IHubContext<TestHub> context)
-        {
-            _context = context;
-        }
-
-        public async Task SendToClient(string connectionId,string ticker, PriceType type, decimal? price)
-        {
-            await _context.Clients.Clients(connectionId).SendAsync("PriceChange", ticker, type, price);
-        }
-    }
-
-    public class TestHub : Hub
-    {
-        private string? _connectionId { get; set; }
-        private readonly PriceDistributor _distributor;
-
-        private List<TestInstrument> defaultInstruments = new List<TestInstrument>()
+        public List<TestInstrument> defaultInstruments = new List<TestInstrument>()
         {
             new TestInstrument("MSFT",390),
             new TestInstrument("APPL", 180),
@@ -125,29 +108,23 @@ namespace sfgridtest
             new TestInstrument("Test10", 10000)
         };
 
-        public TestHub(PriceDistributor distributor)
+        public PriceDistributor(IHubContext<TestHub> context)
         {
-            _distributor = distributor;
-        }
-        public override async Task OnConnectedAsync()
-        {
-            _connectionId = Context.ConnectionId;
-            foreach(var instr in defaultInstruments)
+            _context = context;
+            foreach (var instr in defaultInstruments)
             {
-                _ = Task.Run(() => GenPrice(this, instr, PriceType.Price));
-                _ = Task.Run(() => GenPrice(this, instr, PriceType.Bid));
-                _ = Task.Run(() => GenPrice(this, instr, PriceType.Ask));
+                _ = Task.Run(() => GenPrice(instr, PriceType.Price));
+                _ = Task.Run(() => GenPrice(instr, PriceType.Bid));
+                _ = Task.Run(() => GenPrice(instr, PriceType.Ask));
             }
-            await base.OnConnectedAsync();
         }
 
-        public override async Task OnDisconnectedAsync(Exception? exception)
+        public async Task SendInstrumentToClient(string connectionId,TestInstrument instr)
         {
-            _connectionId = null;
-            await base.OnDisconnectedAsync(exception);
+            await _context.Clients.Clients(connectionId).SendAsync("Instrument",instr);
         }
 
-        private async Task GenPrice(TestHub hub, TestInstrument instr, PriceType type)
+        private async Task GenPrice(TestInstrument instr, PriceType type)
         {
             while (true)
             {
@@ -170,11 +147,44 @@ namespace sfgridtest
                     default:
                         break;
                 }
-                if (_connectionId != null)
-                    await _distributor.SendToClient(_connectionId, instr.Ticker!, type, price);
+                await _context.Clients.All.SendAsync("PriceChange", instr.Ticker!, type, price);
                 int delay = RandomNumberGenerator.GetInt32(100, 500);
                 await Task.Delay(delay);
             }
         }
+    }
+
+    public class TestHub : Hub
+    {
+        private string? _connectionId { get; set; }
+        private readonly PriceDistributor _distributor;
+
+        public TestHub(PriceDistributor distributor)
+        {
+            _distributor = distributor;
+        }
+        public override async Task OnConnectedAsync()
+        {
+            _connectionId = Context.ConnectionId;
+            _ = SendInstruments();
+            await base.OnConnectedAsync();
+        }
+
+        public async Task SendInstruments()
+        {
+            foreach (var instr in _distributor.defaultInstruments)
+            {
+                int delay = RandomNumberGenerator.GetInt32(100, 500);
+                await Task.Delay(delay);
+                await _distributor.SendInstrumentToClient(_connectionId, instr);
+            }
+        }
+
+        public override async Task OnDisconnectedAsync(Exception? exception)
+        {
+            _connectionId = null;
+            await base.OnDisconnectedAsync(exception);
+        }
+
     }
 }
