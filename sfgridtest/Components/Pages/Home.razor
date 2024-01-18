@@ -1,0 +1,131 @@
+﻿@page "/"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@using Syncfusion.Blazor.Grids
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Collections.ObjectModel
+@using System.ComponentModel
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Home</PageTitle>
+
+<div class="container">
+    <div class="row">
+        @SelectedInstrument?.Ticker
+    </div>
+    <div class="row">
+        @SelectedInstrument?.Price
+    </div>
+    <div class="row">
+        @SelectedInstrument?.Bid
+    </div>
+    <div class="row">
+        @SelectedInstrument?.Ask
+    </div>
+</div>
+
+<SfGrid DataSource="@defaultInstruments" AllowSorting="true" AllowResizing="true" AllowSelection="true"
+            ContextMenuItems="@(new List<object>() { new ContextMenuItemModel { Text = "Orderbook", Target = ".e-content", Id = "orderbook" }})"
+            Height="400">
+    <GridSelectionSettings Mode="Syncfusion.Blazor.Grids.SelectionMode.Row" Type="SelectionType.Single"></GridSelectionSettings>
+    <GridEvents RowSelected="RowSelected" TValue="TestInstrument"></GridEvents>
+    <GridColumns>
+        <GridColumn Field="Ticker" HeaderText="Ticker"></GridColumn>
+        <GridColumn Field="Price" HeaderText="Price"></GridColumn>
+        <GridColumn Field="Bid" HeaderText="Bid"></GridColumn>
+        <GridColumn Field="Ask" HeaderText="Ask"></GridColumn>
+    </GridColumns>
+</SfGrid>
+
+@code{
+    public HubConnection? _hubConnection;
+    private List<IDisposable> _disposables = new();
+
+    public TestInstrument? SelectedInstrument
+    {
+        get => _SelectedInstrument;
+        set
+        {
+            if (value != _SelectedInstrument)
+            {
+                if (_SelectedInstrument != null)
+                    _SelectedInstrument.PropertyChanged -= InstrumentPropertyChanged;
+                _SelectedInstrument = value;
+                if (_SelectedInstrument != null)
+                    _SelectedInstrument.PropertyChanged += InstrumentPropertyChanged;
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+    private TestInstrument? _SelectedInstrument { get; set; }
+
+    private ObservableCollection<TestInstrument> defaultInstruments = new ObservableCollection<TestInstrument>()
+    {
+        new TestInstrument("MSFT",390),
+        new TestInstrument("APPL", 180),
+        new TestInstrument("NVDA", 450),
+        new TestInstrument("QQQ", 400),
+        new TestInstrument("OTP", 15000)
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        SelectedInstrument = defaultInstruments.FirstOrDefault();
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/TestHub"), options =>
+            {
+            })
+            .WithKeepAliveInterval(TimeSpan.FromSeconds(10))
+            .WithAutomaticReconnect()
+            .Build();
+        _disposables.Add(_hubConnection.On<string, PriceType, decimal?>("PriceChange",OnPriceChange));
+
+        await _hubConnection.StartAsync();
+
+        await base.OnInitializedAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposables.ForEach(disposable => disposable.Dispose());
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+    }
+
+    public void InstrumentPropertyChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void OnPriceChange(string Ticker, PriceType type, decimal? price)
+    {
+        lock(defaultInstruments)
+        {
+            var instr = defaultInstruments.FirstOrDefault(x => x.Ticker == Ticker);
+            if (instr != null)
+            {
+                switch(type)
+                {
+                    case PriceType.Price:
+                        instr.Price = price;
+                        break;
+                    case PriceType.Bid:
+                        instr.Bid = price;
+                        break;
+                    case PriceType.Ask:
+                        instr.Ask = price;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+
+    public void RowSelected(RowSelectEventArgs<TestInstrument> args)
+    {
+        if (SelectedInstrument != args.Data)
+            SelectedInstrument = args.Data;
+    }
+}
